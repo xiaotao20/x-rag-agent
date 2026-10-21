@@ -148,7 +148,7 @@ front/
 - 消息最大阅读宽度 `72ch`，助手回答左对齐、用户消息右侧气泡。
 - 每个可交互元素都有 hover / focus-visible / disabled 状态。
 - 键盘焦点统一为 2px 蓝色 outline，输入框使用容器 focus ring。
-- 全局 `prefers-reduced-motion` 降低动画；流式光标、消息入场动画都在此规则下禁用。
+- 全局 `prefers-reduced-motion` 降低动画；消息入场动画和状态脉冲都在此规则下禁用。
 - 空状态（示例问题）、加载骨架、离线提示、上传错误、删除确认、停止生成、引用为空等状态均已覆盖。
 - 桌面端侧栏有三种状态：默认隐藏；鼠标移到左侧 12px 区域约 120ms 后以 300ms 缓动滑出，移开约 220ms 后收起；显示时在侧栏与正文的分界线上显示向左的收起按钮。在预览侧栏的空白或文档区域点击会固定侧栏。固定时侧栏宽度从 0 平滑展开、正文同步右移，收回时反向播放，点击分界线上的收起按钮恢复隐藏。上传、删除、刷新等按钮不会触发固定，避免中断当前操作。
 - 知识库标题右侧有刷新按钮，刷新时图标旋转；上传、删除后列表也会自动刷新。
@@ -159,7 +159,7 @@ front/
 - 入口是 `app/globals.css` 的 `@import "tailwindcss";`，设计 token 写在同一个文件的 `@theme` 块里。
 - `postcss.config.mjs` 注册 `@tailwindcss/postcss`，Next.js 构建时自动扫描 `app/`、`components/` 中的类名，不需要额外的 `content` 配置。
 - 颜色、圆角、阴影、字体使用 `--color-*`、`--radius-*`、`--shadow-*`、`--font-*` 命名空间，类名自动生成，例如 `--color-danger-soft` 对应 `bg-danger-soft`。
-- 自定义动画 `animate-rise`、`animate-caret`、`animate-pulse-soft` 及其 `@keyframes` 也定义在 `@theme` 中。
+- 自定义动画 `animate-rise`、`animate-pulse-soft` 及其 `@keyframes` 也定义在 `@theme` 中。
 - 样式在构建时生成静态 CSS，首屏直接带完整样式，没有客户端注入和无样式闪烁。
 - Tailwind 通过静态扫描收集类名，**不要用字符串拼接动态生成类名**（如 `bg-${color}-500`）；本项目所有类名都是字面量。
 

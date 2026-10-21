@@ -16,6 +16,7 @@ def get_embeddings():
         # 百炼兼容接口只接受字符串输入，不接受 LangChain 默认发送的 token ID 数组。
         check_embedding_ctx_length=False,
         # 百炼单请求批量上限会随文本长度收紧（800 字约 20 条），10 条留足余量。
+        # 一次性发送片段数
         chunk_size=10,
     )
 

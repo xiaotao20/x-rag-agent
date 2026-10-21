@@ -33,7 +33,6 @@
   --container-reading: 72ch;
 
   --animate-rise: rise 0.28s ease-out both;
-  --animate-caret: caret 1s steps(1) infinite;
   --animate-pulse-soft: pulse-soft 1.6s ease-in-out infinite;
 
   @keyframes rise {
@@ -44,17 +43,6 @@
     to {
       opacity: 1;
       transform: none;
-    }
-  }
-
-  @keyframes caret {
-    0%,
-    45% {
-      opacity: 1;
-    }
-    55%,
-    100% {
-      opacity: 0;
     }
   }
 

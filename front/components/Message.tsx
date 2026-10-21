@@ -70,7 +70,6 @@ export default function Message({ message }: { message: ChatMessage }) {
         {message.content ? (
           <div className="max-w-reading text-[14px] leading-7 text-ink">
             <Markdown content={message.content} />
-            {streaming && <span className="ml-0.5 inline-block h-[1.05em] w-[0.46em] -translate-y-[0.13em] animate-caret rounded-[1px] bg-current" />}
           </div>
         ) : streaming ? (
           <div className="flex items-center gap-2 py-1 text-[13px] text-muted">
