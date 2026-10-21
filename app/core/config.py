@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     embedding_model: str = "qwen3.7-text-embedding-flash"
     chroma_persist_dir: str = "./data/chroma"
     chroma_collection: str = "knowledge_chunks"
+    checkpoint_db: str = "./data/checkpoints.sqlite"
     upload_dir: str = "./uploads"
     chunk_size: int = 800
     chunk_overlap: int = 120
@@ -26,6 +27,10 @@ class Settings(BaseSettings):
     @property
     def chroma_path(self) -> Path:
         return Path(self.chroma_persist_dir).resolve()
+
+    @property
+    def checkpoint_path(self) -> Path:
+        return Path(self.checkpoint_db).resolve()
 
     @property
     def upload_path(self) -> Path:

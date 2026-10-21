@@ -24,7 +24,28 @@ export type ToolRun = {
   state: 'running' | 'done'
 }
 
-export type MessageStatus = 'streaming' | 'done' | 'error' | 'stopped'
+export type ToolActionRequest = {
+  name: string
+  args: Record<string, unknown>
+  description?: string
+}
+
+export type ReviewConfig = {
+  action_name: string
+  allowed_decisions: Array<'approve' | 'edit' | 'reject'>
+}
+
+export type InterruptPayload = {
+  action_requests: ToolActionRequest[]
+  review_configs: ReviewConfig[]
+}
+
+export type MessageStatus =
+  | 'streaming'
+  | 'done'
+  | 'error'
+  | 'stopped'
+  | 'awaiting_approval'
 
 export type ChatMessage = {
   id: string
@@ -32,14 +53,22 @@ export type ChatMessage = {
   content: string
   sources?: SourceItem[]
   tools?: ToolRun[]
+  interrupt?: InterruptPayload
   status: MessageStatus
   error?: string
 }
 
 export type StreamEvent =
+  | { type: 'thread'; thread_id: string; memory: boolean }
   | { type: 'token'; content: string }
   | { type: 'tool_start'; name: string; args?: unknown }
   | { type: 'tool_end'; name: string }
+  | {
+      type: 'interrupt'
+      thread_id: string
+      action_requests: ToolActionRequest[]
+      review_configs: ReviewConfig[]
+    }
   | { type: 'sources'; sources: SourceItem[] }
   | { type: 'done' }
   | { type: 'error'; message: string }

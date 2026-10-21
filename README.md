@@ -44,22 +44,50 @@ curl -X POST http://127.0.0.1:8000/api/v1/retrieval/search \
   -d '{"query":"RAG 的流程是什么","top_k":2}'
 
 # 5. 提问（需先上传文档，sources 才有内容）
+# 模型要检索时返回 status=interrupted、thread_id 和 interrupt.action_requests
 curl -X POST http://127.0.0.1:8000/api/v1/chat \
   -H 'Content-Type: application/json' \
-  -d '{"question":"根据知识库，RAG 的常见步骤有哪些？"}'
+  -d '{"question":"根据知识库，RAG 的常见步骤有哪些？","memory":false}' | python3 -m json.tool
+
+# 5.1 允许检索（decisions 数量必须等于 action_requests 的数量）
+curl -X POST http://127.0.0.1:8000/api/v1/chat/resume \
+  -H 'Content-Type: application/json' \
+  -d '{"thread_id":"<thread_id>","memory":false,"decisions":[{"type":"approve"},{"type":"approve"}]}' | python3 -m json.tool
+
+# 拒绝检索：把 decision 换成 {"type":"reject","message":"用户拒绝检索"}
 
 # 6. 删除文档（把 <document_id> 替换为第 2 步返回的 ID，同时清理 uploads/ 中的原文件）
 curl -X DELETE http://127.0.0.1:8000/api/v1/documents/<document_id>
 
-# 7. 流式问答（SSE，逐 token 输出；-N 关闭 curl 缓冲）
+# 7. 流式问答（SSE；-N 关闭 curl 缓冲）
 curl -N -X POST http://127.0.0.1:8000/api/v1/chat/stream \
   -H 'Content-Type: application/json' \
-  -d '{"question":"根据知识库，RAG 的常见步骤有哪些？"}'
+  -d '{"question":"根据知识库，RAG 的常见步骤有哪些？","memory":false}'
+
+# 7.1 从流中拿到 thread_id 和 interrupt 后，确认并继续流式输出
+curl -N -X POST http://127.0.0.1:8000/api/v1/chat/stream/resume \
+  -H 'Content-Type: application/json' \
+  -d '{"thread_id":"<thread_id>","memory":false,"decisions":[{"type":"approve"}]}'
 ```
 
-流式接口每行是一个 `data: <JSON>` 事件，`type` 依次可能为 `token`（增量文本）、`tool_start` / `tool_end`（工具调用）、`sources`（引用来源）、`done`（结束）；出错时返回 `error` 事件。非流式接口 `POST /api/v1/chat` 保持不变。
+流式接口每行是一个 `data: <JSON>` 事件，`type` 可能为 `thread`（有效 thread_id）、`token`（增量文本）、`tool_start` / `tool_end`（工具调用）、`interrupt`（等待人工确认，流结束）、`sources`（引用来源）、`done`（结束）或 `error`。收到 `interrupt` 后不要等待 `done`，而是用同一个 `thread_id` 调用 resume 接口继续。
 
 也可以在 Swagger UI（http://127.0.0.1:8000/docs）中逐个接口调试。
+
+## 人工确认与会话记忆
+
+`search_knowledge_base` 工具通过 `HumanInTheLoopMiddleware` 拦截，模型发起检索时会先暂停，等待人工决定：
+
+- **中断时**：非流式返回 `status: "interrupted"`、`thread_id` 和 `interrupt`（包含 `action_requests` 与 `review_configs`）；流式返回 `interrupt` 事件。此时工具尚未执行。
+- **允许/拒绝**：调用 `/api/v1/chat/resume` 或 `/api/v1/chat/stream/resume`，用同一个 `thread_id` 提交 `decisions`。`decisions` 的数量必须等于 `action_requests` 的数量；`reject` 可以附带 `message` 说明原因。
+- **多轮中断**：一次 AI 消息里可能同时请求多个检索（多个 `action_requests`）；恢复后模型也可能再次请求检索，前端会再次显示确认卡片。
+
+会话状态保存在 `data/checkpoints.sqlite`（可用 `.env` 的 `CHECKPOINT_DB` 修改路径）：
+
+- `memory: false`（默认）：每个问题使用新的 `ephemeral-<uuid>` 线程，回答或拒绝完成后立即删除对应 checkpoint；服务启动时也会清理遗留的 `ephemeral-` 线程，避免长期堆积。
+- `memory: true`：沿用请求里的 `thread_id`，模型能看到该线程的历史消息；线程会一直保留，适合需要上下文的对话。
+- 前端输入框上方有「启用会话记忆」开关，默认关闭。关闭时每次提问独立；开启后同一对话复用 thread_id，点击「新对话」会开始新线程。切换开关会从下一条消息开始使用新的会话。
+- `sources` 只在检索工具真正执行后返回；如果模型没有调用工具或用户拒绝了检索，`sources` 为空。
 
 ## 查看知识库内容
 
@@ -146,6 +174,7 @@ rag-agent/
 ├── examples/sample.md
 ├── front/             # Next.js 16 + Tailwind CSS 前端
 ├── data/chroma/       # 运行后生成
+├── data/checkpoints.sqlite  # 运行后生成，SQLite 会话记忆与待确认状态
 ├── uploads/           # 运行后生成
 ├── .env.example
 └── requirements.txt
@@ -157,5 +186,6 @@ rag-agent/
 - 聊天模型必须支持 tool calling；Embedding API 必须支持 embeddings。
 - 切换 embedding 模型或向量维度后，需要清理并重新建立 Chroma 索引。
 - 当前适配阿里百炼（DashScope 兼容模式）：embedding 接口只接受字符串输入，且单请求批量上限随文本长度收紧（长文本约 20 条），代码中已设置 `check_embedding_ctx_length=False` 与 `chunk_size=10`。
+- 启动时会自动加载根目录的 `.env`；配置 `LANGSMITH_TRACING`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT` 后，LangChain 调用会自动上报到 LangSmith。
 - 扫描版 PDF 需要 OCR；本项目只解析有文本层的 PDF。
 - 教学版尚未包含鉴权、租户隔离、限流、恶意文件扫描、异步入库、生产级日志与监控。公网部署前请补齐。

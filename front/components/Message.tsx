@@ -1,4 +1,5 @@
 import { Check, Loader2, Sparkles } from 'lucide-react'
+import ApprovalCard from './ApprovalCard'
 import Markdown from './Markdown'
 import Sources from './Sources'
 import type { ChatMessage } from '@/lib/types'
@@ -11,7 +12,13 @@ function toolLabel(name: string): string {
   return TOOL_LABELS[name] ?? name
 }
 
-export default function Message({ message }: { message: ChatMessage }) {
+interface MessageProps {
+  message: ChatMessage
+  onApprove?: () => void
+  onReject?: () => void
+}
+
+export default function Message({ message, onApprove, onReject }: MessageProps) {
   if (message.role === 'user') {
     return (
       <div className="animate-rise flex justify-end">
@@ -41,6 +48,11 @@ export default function Message({ message }: { message: ChatMessage }) {
               className="animate-pulse-soft text-[11px] text-faint"
             >
               生成中…
+            </span>
+          )}
+          {message.status === 'awaiting_approval' && (
+            <span role="status" aria-live="polite" className="text-[11px] text-warning">
+              等待确认
             </span>
           )}
           {message.status === 'stopped' && (
@@ -80,6 +92,14 @@ export default function Message({ message }: { message: ChatMessage }) {
         ) : message.status === 'stopped' ? (
           <p className="py-1 text-[13px] text-muted">已停止生成。</p>
         ) : null}
+
+        {message.status === 'awaiting_approval' && message.interrupt && onApprove && onReject && (
+          <ApprovalCard
+            payload={message.interrupt}
+            onApprove={onApprove}
+            onReject={onReject}
+          />
+        )}
 
         {message.status === 'error' && (
           <div className="mt-3 rounded-xl border border-danger/20 bg-danger-soft px-3 py-2 text-[12px] leading-5 text-danger">

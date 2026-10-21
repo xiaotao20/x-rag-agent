@@ -73,24 +73,30 @@ export function searchKnowledge(
   })
 }
 
+export type ResumeDecision = {
+  type: 'approve' | 'reject'
+  message?: string
+}
+
 /**
  * POST SSE 无法使用原生 EventSource，这里用 fetch + ReadableStream 手动解析。
  * 后端每条事件格式为 `data: <JSON>\n\n`。
  */
-export async function streamChat(
-  question: string,
+async function streamSSE(
+  path: string,
+  body: Record<string, unknown>,
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   let response: Response
   try {
-    response = await fetch(`${API_BASE}/api/v1/chat/stream`, {
+    response = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
       },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify(body),
       signal,
     })
   } catch (error) {
@@ -135,4 +141,34 @@ export async function streamChat(
       boundary = buffer.indexOf('\n\n')
     }
   }
+}
+
+export function streamChat(
+  question: string,
+  threadId: string,
+  memory: boolean,
+  onEvent: (event: StreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamSSE(
+    '/api/v1/chat/stream',
+    { question, thread_id: threadId, memory },
+    onEvent,
+    signal,
+  )
+}
+
+export function streamResume(
+  threadId: string,
+  memory: boolean,
+  decisions: ResumeDecision[],
+  onEvent: (event: StreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamSSE(
+    '/api/v1/chat/stream/resume',
+    { thread_id: threadId, memory, decisions },
+    onEvent,
+    signal,
+  )
 }

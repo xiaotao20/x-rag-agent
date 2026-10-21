@@ -2,7 +2,7 @@
 
 基于 **Next.js 16（App Router）+ React 19 + Tailwind CSS v4** 的知识库问答界面，对接项目根目录的 FastAPI 后端。
 
-界面分为左侧知识库侧栏和右侧对话区：桌面端侧栏默认收起，鼠标移到左侧边缘会自动滑出预览、移开自动收起；显示时在侧栏与正文的分界线上有向左的收起按钮。在预览侧栏的空白或文档区域点击即可固定显示。支持文档上传/删除、列表刷新、流式回答、工具调用状态、引用来源展开、停止生成、移动端抽屉布局，以及在线/离线、空状态、加载、错误等完整状态。
+界面分为左侧知识库侧栏和右侧对话区：桌面端侧栏默认收起，鼠标移到左侧边缘会自动滑出预览、移开自动收起；显示时在侧栏与正文的分界线上有向左的收起按钮。在预览侧栏的空白或文档区域点击即可固定显示。支持文档上传/删除、列表刷新、流式回答、工具调用状态、检索前人工确认/拒绝、会话记忆开关（默认关闭）、引用来源展开、停止生成、移动端抽屉布局，以及在线/离线、空状态、加载、错误等完整状态。
 
 ## 技术栈
 
@@ -72,9 +72,10 @@ front/
 ├── components/
 │   ├── AppShell.tsx        # 整体布局、健康检查、文档列表状态
 │   ├── Sidebar.tsx         # 文档上传、列表、删除确认、服务状态
-│   ├── ChatPanel.tsx       # 对话状态、流式请求、停止/新对话
-│   ├── Composer.tsx        # 自适应输入框、发送/停止
-│   ├── Message.tsx         # 用户/助手消息、工具状态
+│   ├── ChatPanel.tsx       # 对话状态、流式请求、确认/恢复、会话记忆
+│   ├── Composer.tsx        # 自适应输入框、发送/停止、会话记忆开关
+│   ├── Message.tsx         # 用户/助手消息、工具状态、确认卡片入口
+│   ├── ApprovalCard.tsx    # 工具调用允许/拒绝确认卡片
 │   ├── Markdown.tsx        # Markdown 渲染与排版
 │   ├── Sources.tsx         # 引用来源折叠与片段展开
 │   └── EmptyState.tsx      # 空状态与示例问题
@@ -95,8 +96,10 @@ front/
 | GET | `/api/v1/documents` | 文档列表与片段数 | `AppShell` / `Sidebar` |
 | POST | `/api/v1/documents` | multipart 上传，自动切分入库 | `Sidebar` |
 | DELETE | `/api/v1/documents/{id}` | 删除向量和 uploads 原文件 | `Sidebar` |
-| POST | `/api/v1/chat/stream` | SSE 流式问答（主链路） | `ChatPanel` |
-| POST | `/api/v1/chat` | 非流式问答（前端未使用，保留调试） | — |
+| POST | `/api/v1/chat/stream` | SSE 流式问答（主链路），请求带 `thread_id`、`memory` | `ChatPanel` |
+| POST | `/api/v1/chat/stream/resume` | 人工确认/拒绝后继续 SSE 流 | `ChatPanel` |
+| POST | `/api/v1/chat` | 非流式问答，命中检索时返回 `status=interrupted`（前端未使用） | — |
+| POST | `/api/v1/chat/resume` | 非流式恢复（前端未使用） | — |
 | POST | `/api/v1/retrieval/search` | 纯检索（前端未使用，便于调试） | — |
 
 ## 流式协议
@@ -105,14 +108,25 @@ front/
 
 | `type` | 字段 | 前端行为 |
 |---|---|---|
+| `thread` | `thread_id`、`memory` | 保存后端返回的有效 thread_id，用于后续恢复 |
 | `token` | `content` | 追加到助手消息，实时渲染 Markdown |
 | `tool_start` | `name`、`args` | 显示「检索知识库…」状态胶囊 |
 | `tool_end` | `name` | 状态胶囊变为完成 |
-| `sources` | `sources[]` | 显示「引用来源」折叠面板 |
+| `interrupt` | `thread_id`、`action_requests`、`review_configs` | 显示确认卡片并暂停输入；流在此结束 |
+| `sources` | `sources[]` | 显示「引用来源」折叠面板；只有工具真正执行后才会返回 |
 | `done` | — | 结束流，恢复发送按钮 |
 | `error` | `message` | 显示红色错误卡片（HTTP 状态此时已是 200） |
 
-停止生成使用 `AbortController` 中断 fetch，后端连接关闭后停止生成；消息标记为「已停止」。
+收到 `interrupt` 后，前端把决策提交到 `/chat/stream/resume`，用返回的 token 继续填充同一条助手消息。停止生成使用 `AbortController` 中断 fetch；消息标记为「已停止」。
+
+## 人工确认与会话记忆
+
+- 输入框上方有「启用会话记忆」开关，**默认关闭**。关闭时每次提问生成新的临时 thread，后端在回答或拒绝完成后删除对应 checkpoint；开启时同一对话复用 thread_id，并保留历史上下文。
+- 检索工具执行前会显示确认卡片，列出工具名、检索 query 和说明。可以「允许」或「拒绝」；拒绝后模型会基于拒绝消息继续回答，但不会产生新的检索结果。
+- 同一轮可能有多个 `action_requests`，当前版本统一允许或统一拒绝；恢复后模型如果再次请求检索，会再次弹出确认卡片。
+- 等待确认期间输入框、「新对话」和记忆开关都会被禁用，避免和 pending 状态冲突。
+- 切换记忆开关会从下一条消息开始使用新的 thread，不会把之前的临时会话带入。
+- 临时线程以前缀 `ephemeral-` 标识；服务启动时后端会清理遗留的临时线程，避免数据库无限增长。开启记忆的线程会长期保留在 `data/checkpoints.sqlite`。
 
 ## 设计系统
 
@@ -211,7 +225,9 @@ npm install @next/swc-darwin-arm64@16.4.2 --no-save
 
 ## 已知限制
 
-- 只有单轮会话状态，刷新页面后清空，没有会话持久化。
+- 刷新页面会丢失前端保存的 thread_id 和待确认卡片；后端 SQLite 中可能仍有状态，但暂未提供前端恢复接口。
+- 开启记忆的会话线程会长期保留；关闭记忆的临时线程在完成或被清理后删除。
+- 当前确认卡片对同一轮的多个工具调用只提供统一允许/拒绝，未提供逐项决策。
 - 没有登录、租户隔离和权限控制，适合本地或内网使用。
 - 引用来源展示的是 Chroma 向量距离（越小越相似），不是概率分数。
 - Markdown 不渲染原始 HTML（react-markdown 默认转义），避免 XSS。

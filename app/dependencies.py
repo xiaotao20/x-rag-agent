@@ -1,4 +1,6 @@
 from functools import lru_cache
+from typing import Any
+
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from app.core.config import get_settings
@@ -34,8 +36,24 @@ def get_ingestion_service():
     s = get_settings()
     return IngestionService(get_vector_store(), s.upload_path, s.chunk_size, s.chunk_overlap, s.max_upload_mb)
 
-@lru_cache
-def get_rag_agent():
-    s = get_settings()
-    model = ChatOpenAI(model=s.chat_model, api_key=s.openai_api_key, base_url=s.openai_base_url, temperature=0)
-    return RagAgent(model, get_retrieval_service())
+_rag_agent: RagAgent | None = None
+
+
+def init_rag_agent(checkpointer: Any) -> RagAgent:
+    global _rag_agent
+    if _rag_agent is None:
+        s = get_settings()
+        model = ChatOpenAI(
+            model=s.chat_model,
+            api_key=s.openai_api_key,
+            base_url=s.openai_base_url,
+            temperature=0,
+        )
+        _rag_agent = RagAgent(model, get_retrieval_service(), checkpointer)
+    return _rag_agent
+
+
+def get_rag_agent() -> RagAgent:
+    if _rag_agent is None:
+        raise RuntimeError("RagAgent 尚未初始化，应用启动流程未执行")
+    return _rag_agent

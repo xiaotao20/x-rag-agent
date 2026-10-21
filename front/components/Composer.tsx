@@ -11,6 +11,10 @@ interface ComposerProps {
   onStop: () => void
   streaming: boolean
   offline: boolean
+  memoryEnabled: boolean
+  onToggleMemory: () => void
+  busy: boolean
+  awaitingApproval: boolean
 }
 
 export default function Composer({
@@ -20,6 +24,10 @@ export default function Composer({
   onStop,
   streaming,
   offline,
+  memoryEnabled,
+  onToggleMemory,
+  busy,
+  awaitingApproval,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -39,10 +47,50 @@ export default function Composer({
           onSubmit()
         }}
       >
+        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={memoryEnabled}
+            aria-label="启用会话记忆"
+            onClick={onToggleMemory}
+            disabled={busy}
+            className={cx(
+              'inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] transition-colors',
+              memoryEnabled
+                ? 'border-accent/30 bg-accent-soft text-accent'
+                : 'border-line bg-surface text-muted',
+              busy && 'cursor-not-allowed opacity-60',
+            )}
+          >
+            <span
+              className={cx(
+                'relative inline-flex h-3.5 w-6 items-center rounded-full transition-colors',
+                memoryEnabled ? 'bg-accent' : 'bg-line',
+              )}
+            >
+              <span
+                className={cx(
+                  'absolute h-2.5 w-2.5 rounded-full bg-white shadow-sm transition-transform',
+                  memoryEnabled ? 'translate-x-3' : 'translate-x-0.5',
+                )}
+              />
+            </span>
+            启用会话记忆
+          </button>
+          <span className="text-[11px] text-faint">
+            {awaitingApproval
+              ? '请先确认上方的检索操作'
+              : memoryEnabled
+                ? '本对话保留上下文'
+                : '每次提问独立'}
+          </span>
+        </div>
+
         <div
           className={cx(
             'rounded-2xl border border-line bg-surface p-2 shadow-card transition-all',
-            !streaming && 'focus-within:border-accent/60 focus-within:ring-4 focus-within:ring-accent-soft',
+            !busy && 'focus-within:border-accent/60 focus-within:ring-4 focus-within:ring-accent-soft',
           )}
         >
           <textarea
@@ -50,6 +98,7 @@ export default function Composer({
             rows={1}
             value={value}
             maxLength={4000}
+            disabled={busy}
             onChange={(event) => onChange(event.target.value)}
             onKeyDown={(event) => {
               if (
@@ -63,11 +112,13 @@ export default function Composer({
             }}
             placeholder="问点什么，比如：这个项目的部署步骤是什么？"
             aria-label="输入问题"
-            className="max-h-44 min-h-[44px] w-full resize-none bg-transparent px-2.5 py-2 text-[14px] leading-6 outline-none placeholder:text-faint"
+            className="max-h-44 min-h-[44px] w-full resize-none bg-transparent px-2.5 py-2 text-[14px] leading-6 outline-none placeholder:text-faint disabled:opacity-60"
           />
           <div className="flex items-center justify-between gap-2 px-1 pb-0.5">
             <span className="hidden text-[11px] text-faint sm:block">
-              Enter 发送 · Shift + Enter 换行
+              {awaitingApproval
+                ? '等待确认检索操作…'
+                : 'Enter 发送 · Shift + Enter 换行'}
             </span>
             <span className="text-[11px] text-faint sm:hidden">
               {value.length > 0 ? `${value.length}/4000` : '输入问题'}
@@ -88,7 +139,7 @@ export default function Composer({
               ) : (
                 <button
                   type="submit"
-                  disabled={!value.trim()}
+                  disabled={busy || !value.trim()}
                   aria-label="发送"
                   className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:bg-line disabled:text-faint"
                 >

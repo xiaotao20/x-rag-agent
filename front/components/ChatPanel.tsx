@@ -5,14 +5,21 @@ import { Menu, Plus } from 'lucide-react'
 import Composer from './Composer'
 import EmptyState from './EmptyState'
 import Message from './Message'
-import { streamChat } from '@/lib/api'
-import type { ChatMessage, StreamEvent } from '@/lib/types'
+import { streamChat, streamResume, type ResumeDecision } from '@/lib/api'
+import type { ChatMessage, InterruptPayload, StreamEvent } from '@/lib/types'
 import { cx, errorText } from '@/lib/utils'
 
 interface ChatPanelProps {
   online: boolean | null
   documentCount: number
   onToggleSidebar: () => void
+}
+
+type PendingApproval = {
+  messageId: string
+  threadId: string
+  memory: boolean
+  interrupt: InterruptPayload
 }
 
 function newId(): string {
@@ -30,6 +37,9 @@ export default function ChatPanel({
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [memoryEnabled, setMemoryEnabled] = useState(false)
+  const [threadId, setThreadId] = useState<string | null>(null)
+  const [pending, setPending] = useState<PendingApproval | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   const busyRef = useRef(false)
@@ -49,9 +59,96 @@ export default function ChatPanel({
       element.scrollHeight - element.scrollTop - element.clientHeight < 96
   }
 
+  function updateMessage(
+    messageId: string,
+    updater: (message: ChatMessage) => ChatMessage,
+  ) {
+    setMessages((previous) =>
+      previous.map((message) =>
+        message.id === messageId ? updater(message) : message,
+      ),
+    )
+  }
+
+  function makeEventHandler(messageId: string, memory: boolean) {
+    return (event: StreamEvent) => {
+      if (event.type === 'thread') {
+        setThreadId(event.thread_id)
+        return
+      }
+      if (event.type === 'token') {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          content: message.content + event.content,
+        }))
+        return
+      }
+      if (event.type === 'tool_start') {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          tools: [...(message.tools ?? []), { name: event.name, state: 'running' }],
+        }))
+        return
+      }
+      if (event.type === 'tool_end') {
+        updateMessage(messageId, (message) => {
+          const tools = [...(message.tools ?? [])]
+          for (let index = tools.length - 1; index >= 0; index -= 1) {
+            if (tools[index].name === event.name && tools[index].state === 'running') {
+              tools[index] = { ...tools[index], state: 'done' }
+              break
+            }
+          }
+          return { ...message, tools }
+        })
+        return
+      }
+      if (event.type === 'sources') {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          sources: event.sources,
+        }))
+        return
+      }
+      if (event.type === 'interrupt') {
+        const interrupt: InterruptPayload = {
+          action_requests: event.action_requests,
+          review_configs: event.review_configs,
+        }
+        updateMessage(messageId, (message) => ({
+          ...message,
+          status: 'awaiting_approval',
+          interrupt,
+        }))
+        setPending({
+          messageId,
+          threadId: event.thread_id,
+          memory,
+          interrupt,
+        })
+        return
+      }
+      if (event.type === 'error') {
+        updateMessage(messageId, (message) => ({
+          ...message,
+          status: 'error',
+          error: event.message,
+        }))
+        return
+      }
+      if (event.type === 'done') {
+        updateMessage(messageId, (message) => ({ ...message, status: 'done' }))
+      }
+    }
+  }
+
   async function send(raw?: string) {
     const question = (raw ?? input).trim()
-    if (!question || busyRef.current) return
+    if (!question || busyRef.current || pending) return
+
+    const memory = memoryEnabled
+    const requestedThreadId = memory ? threadId ?? newId() : newId()
+    if (memory) setThreadId(requestedThreadId)
 
     busyRef.current = true
     setStreaming(true)
@@ -76,63 +173,17 @@ export default function ChatPanel({
 
     const controller = new AbortController()
     abortRef.current = controller
-
-    const updateAssistant = (updater: (message: ChatMessage) => ChatMessage) => {
-      setMessages((previous) =>
-        previous.map((message) =>
-          message.id === assistantId ? updater(message) : message,
-        ),
-      )
-    }
-
-    const onEvent = (event: StreamEvent) => {
-      if (event.type === 'token') {
-        updateAssistant((message) => ({
-          ...message,
-          content: message.content + event.content,
-        }))
-        return
-      }
-      if (event.type === 'tool_start') {
-        updateAssistant((message) => ({
-          ...message,
-          tools: [...(message.tools ?? []), { name: event.name, state: 'running' }],
-        }))
-        return
-      }
-      if (event.type === 'tool_end') {
-        updateAssistant((message) => {
-          const tools = [...(message.tools ?? [])]
-          for (let index = tools.length - 1; index >= 0; index -= 1) {
-            if (tools[index].name === event.name && tools[index].state === 'running') {
-              tools[index] = { ...tools[index], state: 'done' }
-              break
-            }
-          }
-          return { ...message, tools }
-        })
-        return
-      }
-      if (event.type === 'sources') {
-        updateAssistant((message) => ({ ...message, sources: event.sources }))
-        return
-      }
-      if (event.type === 'error') {
-        updateAssistant((message) => ({
-          ...message,
-          status: 'error',
-          error: event.message,
-        }))
-        return
-      }
-      if (event.type === 'done') {
-        updateAssistant((message) => ({ ...message, status: 'done' }))
-      }
-    }
+    const onEvent = makeEventHandler(assistantId, memory)
 
     try {
-      await streamChat(question, onEvent, controller.signal)
-      updateAssistant((message) =>
+      await streamChat(
+        question,
+        requestedThreadId,
+        memory,
+        onEvent,
+        controller.signal,
+      )
+      updateMessage(assistantId, (message) =>
         message.status === 'streaming' ? { ...message, status: 'done' } : message,
       )
     } catch (error) {
@@ -140,9 +191,12 @@ export default function ChatPanel({
         (error instanceof DOMException && error.name === 'AbortError') ||
         (error instanceof Error && error.name === 'AbortError')
       if (aborted) {
-        updateAssistant((message) => ({ ...message, status: 'stopped' }))
+        updateMessage(assistantId, (message) => ({
+          ...message,
+          status: 'stopped',
+        }))
       } else {
-        updateAssistant((message) => ({
+        updateMessage(assistantId, (message) => ({
           ...message,
           status: 'error',
           error: errorText(error),
@@ -152,6 +206,68 @@ export default function ChatPanel({
       busyRef.current = false
       setStreaming(false)
       abortRef.current = null
+      if (!memory) setThreadId(null)
+    }
+  }
+
+  async function decide(type: 'approve' | 'reject') {
+    const current = pending
+    if (!current || busyRef.current) return
+
+    const decisions: ResumeDecision[] = current.interrupt.action_requests.map(() =>
+      type === 'reject'
+        ? { type: 'reject', message: '用户拒绝了本次检索' }
+        : { type: 'approve' },
+    )
+
+    setPending(null)
+    updateMessage(current.messageId, (message) => ({
+      ...message,
+      status: 'streaming',
+      interrupt: undefined,
+      error: undefined,
+    }))
+
+    busyRef.current = true
+    setStreaming(true)
+    stickToBottom.current = true
+
+    const controller = new AbortController()
+    abortRef.current = controller
+    const onEvent = makeEventHandler(current.messageId, current.memory)
+
+    try {
+      await streamResume(
+        current.threadId,
+        current.memory,
+        decisions,
+        onEvent,
+        controller.signal,
+      )
+      updateMessage(current.messageId, (message) =>
+        message.status === 'streaming' ? { ...message, status: 'done' } : message,
+      )
+    } catch (error) {
+      const aborted =
+        (error instanceof DOMException && error.name === 'AbortError') ||
+        (error instanceof Error && error.name === 'AbortError')
+      if (aborted) {
+        updateMessage(current.messageId, (message) => ({
+          ...message,
+          status: 'stopped',
+        }))
+      } else {
+        updateMessage(current.messageId, (message) => ({
+          ...message,
+          status: 'error',
+          error: errorText(error),
+        }))
+      }
+    } finally {
+      busyRef.current = false
+      setStreaming(false)
+      abortRef.current = null
+      if (!current.memory) setThreadId(null)
     }
   }
 
@@ -159,13 +275,24 @@ export default function ChatPanel({
     abortRef.current?.abort()
   }
 
+  function toggleMemory() {
+    if (streaming || pending) return
+    setMemoryEnabled((value) => !value)
+    setThreadId(null)
+  }
+
   function newChat() {
+    if (streaming || pending) return
     abortRef.current?.abort()
     busyRef.current = false
     setStreaming(false)
     setMessages([])
     setInput('')
+    setPending(null)
+    setThreadId(null)
   }
+
+  const busy = streaming || pending !== null
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
@@ -202,7 +329,8 @@ export default function ChatPanel({
           <button
             type="button"
             onClick={newChat}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-medium shadow-sm transition-colors hover:bg-subtle"
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-medium shadow-sm transition-colors hover:bg-subtle disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" />
             新对话
@@ -226,7 +354,12 @@ export default function ChatPanel({
             <div className="mx-auto w-full max-w-3xl px-4 pb-10 pt-8 sm:px-6">
               <div className="space-y-8">
                 {messages.map((message) => (
-                  <Message key={message.id} message={message} />
+                  <Message
+                    key={message.id}
+                    message={message}
+                    onApprove={() => void decide('approve')}
+                    onReject={() => void decide('reject')}
+                  />
                 ))}
               </div>
             </div>
@@ -240,6 +373,10 @@ export default function ChatPanel({
           onStop={stop}
           streaming={streaming}
           offline={online === false}
+          memoryEnabled={memoryEnabled}
+          onToggleMemory={toggleMemory}
+          busy={busy}
+          awaitingApproval={pending !== null}
         />
       </div>
     </div>

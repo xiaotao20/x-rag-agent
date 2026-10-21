@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 class SearchRequest(BaseModel):
@@ -6,6 +8,13 @@ class SearchRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
+    thread_id: str | None = Field(default=None, max_length=128)
+    memory: bool = False
+
+class ResumeRequest(BaseModel):
+    thread_id: str = Field(min_length=1, max_length=128)
+    memory: bool = False
+    decisions: list[dict] = Field(min_length=1)
 
 class SourceItem(BaseModel):
     document_id: str
@@ -20,9 +29,12 @@ class SearchResponse(BaseModel):
 
 class ChatResponse(BaseModel):
     question: str
-    answer: str
-    sources: list[SourceItem]
+    thread_id: str
+    status: Literal["completed", "interrupted"] = "completed"
+    answer: str = ""
+    sources: list[SourceItem] = []
     tool_calls: list[dict] = []
+    interrupt: dict | None = None
 
 class IngestResponse(BaseModel):
     document_id: str
