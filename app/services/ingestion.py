@@ -1,9 +1,12 @@
+import logging
 from pathlib import Path
 from uuid import uuid4
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_chroma import Chroma
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED = {".txt", ".md", ".pdf"}
 
@@ -12,6 +15,7 @@ class IngestionService:
         self.vector_store = vector_store
         self.upload_dir = upload_dir
         self.upload_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("=========>%s文件目录创建成功", upload_dir)
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
             chunk_overlap=min(chunk_overlap, max(0, chunk_size - 1)),
