@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="base" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050816"/>
+      <stop offset="0.48" stop-color="#071426"/>
+      <stop offset="1" stop-color="#0b1028"/>
+    </linearGradient>
+    <radialGradient id="cyanGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.42"/>
+      <stop offset="0.5" stop-color="#0891b2" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#050816" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="violetGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.34"/>
+      <stop offset="0.55" stop-color="#4f46e5" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#050816" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M 64 0 L 0 0 0 64" fill="none" stroke="#22d3ee" stroke-opacity="0.07" stroke-width="1"/>
+    </pattern>
+    <pattern id="dots" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#67e8f9" fill-opacity="0.14"/>
+    </pattern>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="60"/>
+    </filter>
+    <filter id="softBlur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="24"/>
+    </filter>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0"/>
+      <stop offset="0.45" stop-color="#22d3ee" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#base)"/>
+  <rect width="1600" height="1000" fill="url(#grid)"/>
+  <rect width="1600" height="1000" fill="url(#dots)" opacity="0.55"/>
+
+  <ellipse cx="300" cy="180" rx="420" ry="330" fill="url(#cyanGlow)" filter="url(#blur)"/>
+  <ellipse cx="1320" cy="260" rx="460" ry="360" fill="url(#violetGlow)" filter="url(#blur)"/>
+  <ellipse cx="920" cy="880" rx="520" ry="260" fill="url(#cyanGlow)" opacity="0.55" filter="url(#blur)"/>
+
+  <g opacity="0.38" filter="url(#softBlur)">
+    <path d="M-120 760 C 260 560, 420 830, 820 610 S 1320 330, 1720 470" fill="none" stroke="url(#beam)" stroke-width="2"/>
+    <path d="M-80 240 C 280 390, 560 110, 920 300 S 1380 520, 1680 300" fill="none" stroke="url(#beam)" stroke-width="1.5"/>
+    <path d="M120 1040 C 360 780, 700 980, 980 720 S 1380 540, 1740 680" fill="none" stroke="#22d3ee" stroke-opacity="0.18" stroke-width="1"/>
+  </g>
+
+  <g opacity="0.5">
+    <circle cx="240" cy="280" r="3" fill="#67e8f9"/>
+    <circle cx="420" cy="620" r="2" fill="#a78bfa"/>
+    <circle cx="760" cy="220" r="2.5" fill="#67e8f9"/>
+    <circle cx="1040" cy="560" r="3" fill="#38bdf8"/>
+    <circle cx="1320" cy="180" r="2" fill="#c4b5fd"/>
+    <circle cx="1480" cy="720" r="2.5" fill="#67e8f9"/>
+    <circle cx="880" cy="860" r="2" fill="#a78bfa"/>
+  </g>
+
+  <g stroke="#22d3ee" stroke-opacity="0.1" fill="none">
+    <circle cx="1180" cy="230" r="120"/>
+    <circle cx="1180" cy="230" r="190"/>
+    <circle cx="360" cy="720" r="150"/>
+    <circle cx="360" cy="720" r="230"/>
+  </g>
+
+  <rect width="1600" height="1000" fill="url(#base)" opacity="0.22"/>
+</svg>

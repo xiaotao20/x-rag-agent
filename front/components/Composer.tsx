@@ -13,6 +13,7 @@ interface ComposerProps {
   offline: boolean
 }
 
+/** 问题输入框和发送/停止控制。 */
 export default function Composer({
   value,
   onChange,
@@ -31,7 +32,7 @@ export default function Composer({
   }, [value])
 
   return (
-    <div className="shrink-0 border-t border-line/70 bg-canvas/90 px-3 pb-3 pt-3 backdrop-blur sm:px-6 sm:pb-4">
+    <div className="shrink-0 px-3 pb-3 pt-3 sm:px-6 sm:pb-4">
       <form
         className="mx-auto max-w-3xl"
         onSubmit={(event) => {
@@ -63,7 +64,7 @@ export default function Composer({
             }}
             placeholder="问点什么，比如：这个项目的部署步骤是什么？"
             aria-label="输入问题"
-            className="max-h-44 min-h-[44px] w-full resize-none bg-transparent px-2.5 py-2 text-[14px] leading-6 outline-none placeholder:text-faint"
+            className="max-h-44 min-h-[44px] w-full resize-none bg-transparent px-2.5 py-2 text-[15px] leading-6 outline-none placeholder:text-faint"
           />
           <div className="flex items-center justify-between gap-2 px-1 pb-0.5">
             <span className="hidden text-[11px] text-faint sm:block">

@@ -1,21 +1,14 @@
-import { Check, Loader2, Sparkles } from 'lucide-react'
+import { Loader2, Sparkles } from 'lucide-react'
 import Markdown from './Markdown'
 import Sources from './Sources'
 import type { ChatMessage } from '@/lib/types'
 
-const TOOL_LABELS: Record<string, string> = {
-  search_knowledge_base: '检索知识库',
-}
-
-function toolLabel(name: string): string {
-  return TOOL_LABELS[name] ?? name
-}
-
+/** 用户或助手消息的渲染。 */
 export default function Message({ message }: { message: ChatMessage }) {
   if (message.role === 'user') {
     return (
       <div className="animate-rise flex justify-end">
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-ink px-4 py-2.5 text-[14px] leading-6 text-white">
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-bubble-line bg-bubble px-4 py-2.5 text-[15px] leading-7 text-ink shadow-[0_1px_2px_rgba(36,56,143,0.04)]">
           {message.content}
         </div>
       </div>
@@ -23,7 +16,6 @@ export default function Message({ message }: { message: ChatMessage }) {
   }
 
   const streaming = message.status === 'streaming'
-  const tools = message.tools ?? []
 
   return (
     <div className="animate-rise flex gap-3">
@@ -48,27 +40,8 @@ export default function Message({ message }: { message: ChatMessage }) {
           )}
         </div>
 
-        {tools.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {tools.map((tool, index) => (
-              <span
-                key={`${tool.name}-${index}`}
-                className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] text-muted"
-              >
-                {tool.state === 'running' ? (
-                  <Loader2 className="h-3 w-3 animate-spin text-accent" />
-                ) : (
-                  <Check className="h-3 w-3 text-success" />
-                )}
-                {toolLabel(tool.name)}
-                {tool.state === 'running' ? '…' : ''}
-              </span>
-            ))}
-          </div>
-        )}
-
         {message.content ? (
-          <div className="max-w-reading text-[14px] leading-7 text-ink">
+          <div className="max-w-reading text-[15px] leading-7 text-ink">
             <Markdown content={message.content} />
           </div>
         ) : streaming ? (

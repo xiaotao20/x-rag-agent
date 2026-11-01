@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.py[cod]
+.env
+.env.*
+data
+uploads
+logs
+front
+.idea
+.claude
+.mcp.json
+node_modules

@@ -1,9 +1,19 @@
-import type { DocumentItem, IngestResponse, SourceItem, StreamEvent } from './types'
+import type {
+  ConversationDetail,
+  ConversationSummary,
+  DocumentItem,
+  IngestResponse,
+  SourceItem,
+  StreamEvent,
+} from './types'
 
-export const API_BASE = (
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000'
-).replace(/\/+$/, '')
+/** 浏览器访问后端的基地址；空值表示走 Next 同源代理。 */
+export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL ?? '').replace(
+  /\/+$/,
+  '',
+)
 
+/** API 请求错误。 */
 export class ApiError extends Error {
   status: number
 
@@ -14,6 +24,7 @@ export class ApiError extends Error {
   }
 }
 
+/** 读取后端错误响应并提取可读信息。 */
 async function readError(response: Response): Promise<string> {
   try {
     const data = await response.json()
@@ -24,10 +35,14 @@ async function readError(response: Response): Promise<string> {
   }
 }
 
+/** 发送 JSON 请求并统一处理错误。 */
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
-    response = await fetch(`${API_BASE}${path}`, init)
+    response = await fetch(`${API_BASE}${path}`, {
+      credentials: 'include',
+      ...init,
+    })
   } catch {
     throw new ApiError(
       '无法连接后端服务，请确认 FastAPI 已启动（默认 http://127.0.0.1:8000）',
@@ -40,20 +55,24 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T
 }
 
+/** 检查后端健康状态。 */
 export function checkHealth(): Promise<{ status: string }> {
   return requestJson('/api/v1/health')
 }
 
+/** 获取已入库文档列表。 */
 export function listDocuments(): Promise<DocumentItem[]> {
   return requestJson('/api/v1/documents')
 }
 
+/** 上传文档。 */
 export async function uploadDocument(file: File): Promise<IngestResponse> {
   const form = new FormData()
   form.append('file', file)
   return requestJson('/api/v1/documents', { method: 'POST', body: form })
 }
 
+/** 删除文档及其片段。 */
 export function deleteDocument(
   documentId: string,
 ): Promise<{ document_id: string; chunks_deleted: number }> {
@@ -62,6 +81,7 @@ export function deleteDocument(
   })
 }
 
+/** 直接调用检索接口。 */
 export function searchKnowledge(
   query: string,
   topK?: number,
@@ -73,12 +93,50 @@ export function searchKnowledge(
   })
 }
 
+/** 获取当前用户会话列表。 */
+export function listConversations(): Promise<ConversationSummary[]> {
+  return requestJson('/api/v1/conversations')
+}
+
+/** 获取会话详情和历史消息。 */
+export function getConversation(
+  conversationId: string,
+): Promise<ConversationDetail> {
+  return requestJson(`/api/v1/conversations/${encodeURIComponent(conversationId)}`)
+}
+
+/** 重命名会话。 */
+export function renameConversation(
+  conversationId: string,
+  title: string,
+): Promise<ConversationSummary> {
+  return requestJson(
+    `/api/v1/conversations/${encodeURIComponent(conversationId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    },
+  )
+}
+
+/** 删除会话。 */
+export function deleteConversation(
+  conversationId: string,
+): Promise<{ ok: boolean }> {
+  return requestJson(`/api/v1/conversations/${encodeURIComponent(conversationId)}`, {
+    method: 'DELETE',
+  })
+}
+
 /**
  * POST SSE 无法使用原生 EventSource，这里用 fetch + ReadableStream 手动解析。
  * 后端每条事件格式为 `data: <JSON>\n\n`。
  */
+/** 通过 fetch 读取 POST SSE 流并逐事件回调。 */
 export async function streamChat(
   question: string,
+  conversationId: string | null,
   onEvent: (event: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -86,11 +144,14 @@ export async function streamChat(
   try {
     response = await fetch(`${API_BASE}/api/v1/chat/stream`, {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
       },
-      body: JSON.stringify({ question }),
+      body: JSON.stringify(
+        conversationId ? { question, conversation_id: conversationId } : { question },
+      ),
       signal,
     })
   } catch (error) {

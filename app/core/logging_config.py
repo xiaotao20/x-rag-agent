@@ -13,11 +13,13 @@ class LevelFilter(logging.Filter):
     """只允许指定级别的日志通过。"""
 
     def __init__(self, level, exact=True):
+        """保存最低日志级别和是否精确匹配。"""
         super().__init__()
         self.level = level
         self.exact = exact
 
     def filter(self, record):
+        """判断日志记录是否达到配置级别。"""
         if self.exact:
             return record.levelno == self.level
         return record.levelno >= self.level
@@ -27,6 +29,7 @@ class DailyLevelHandler(logging.Handler):
     """按日期 + 日志级别写文件，并压缩和清理历史日志。"""
 
     def __init__(self, log_dir, level_name, retention_days=30):
+        """初始化日志目录、级别和保留天数。"""
         super().__init__()
         self.log_dir = Path(log_dir)
         self.level_name = level_name.lower()
@@ -40,6 +43,7 @@ class DailyLevelHandler(logging.Handler):
         self._cleanup()
 
     def _open_for_today(self):
+        """按当前日期切换日志文件。"""
         today = datetime.now().strftime("%Y-%m-%d")
 
         if self.current_date == today and self.stream:
@@ -56,6 +60,7 @@ class DailyLevelHandler(logging.Handler):
         self._cleanup()
 
     def emit(self, record):
+        """写入一条日志并立即刷新。"""
         try:
             self._open_for_today()
             message = self.format(record)
@@ -65,6 +70,7 @@ class DailyLevelHandler(logging.Handler):
             self.handleError(record)
 
     def _cleanup(self):
+        """压缩历史日志并删除过期压缩文件。"""
         cutoff = time.time() - self.retention_days * 86400
 
         for path in self.log_dir.glob(f"*-{self.level_name}.log"):
@@ -93,6 +99,7 @@ class DailyLevelHandler(logging.Handler):
                 continue
 
     def close(self):
+        """关闭当前日志文件流。"""
         if self.stream:
             self.stream.close()
             self.stream = None
@@ -100,6 +107,7 @@ class DailyLevelHandler(logging.Handler):
 
 
 def setup_logging():
+    """配置按级别和日期切分的文件日志及控制台输出。"""
     log_dir = Path(os.getenv("LOG_DIR", "./logs")).expanduser()
     log_dir.mkdir(parents=True, exist_ok=True)
 

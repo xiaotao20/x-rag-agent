@@ -1,97 +1,165 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
-  FileText,
+  Library,
   Loader2,
-  RefreshCw,
-  Sparkles,
+  LogOut,
+  Pencil,
+  SquarePen,
   Trash2,
-  UploadCloud,
+  UserRound,
   X,
 } from 'lucide-react'
-import { deleteDocument, uploadDocument } from '@/lib/api'
-import type { DocumentItem } from '@/lib/types'
-import { cx, errorText, formatBytes } from '@/lib/utils'
-
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
-const ALLOWED_EXTENSIONS = ['txt', 'md', 'pdf']
+import ConfirmDialog from './ConfirmDialog'
+import { logout } from '@/lib/auth'
+import type { AuthUser } from '@/lib/auth'
+import type { ConversationSummary, WorkspaceView } from '@/lib/types'
+import { cx, errorText } from '@/lib/utils'
 
 interface SidebarProps {
-  documents: DocumentItem[]
-  loading: boolean
-  error: string | null
+  user: AuthUser
   online: boolean | null
-  onRefresh: () => void
-  onChanged: () => void
+  activeView: WorkspaceView
+  onViewChange: (view: WorkspaceView) => void
+  conversations: ConversationSummary[]
+  conversationsLoading: boolean
+  conversationsError: string | null
+  activeConversationId: string | null
+  onSelectConversation: (conversationId: string) => void
+  onNewConversation: () => void
+  onRefreshConversations: () => void
+  onRenameConversation: (conversationId: string, title: string) => Promise<void>
+  onDeleteConversation: (conversationId: string) => Promise<void>
   onClose?: () => void
 }
 
+/** 视图导航、会话列表和账号菜单侧栏。 */
 export default function Sidebar({
-  documents,
-  loading,
-  error,
+  user,
   online,
-  onRefresh,
-  onChanged,
+  activeView,
+  onViewChange,
+  conversations,
+  conversationsLoading,
+  conversationsError,
+  activeConversationId,
+  onSelectConversation,
+  onNewConversation,
+  onRefreshConversations,
+  onRenameConversation,
+  onDeleteConversation,
   onClose,
 }: SidebarProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [dragging, setDragging] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const [renameSaving, setRenameSaving] = useState(false)
+  const [pendingDeleteConversation, setPendingDeleteConversation] = useState<string | null>(null)
+  const [deletingConversation, setDeletingConversation] = useState<string | null>(null)
+  const [conversationActionError, setConversationActionError] = useState<string | null>(null)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
+  const accountRef = useRef<HTMLDivElement>(null)
 
-  async function handleFile(file: File | undefined) {
-    if (!file) return
-    const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
-    if (!ALLOWED_EXTENSIONS.includes(extension)) {
-      setUploadError('仅支持 .txt、.md、.pdf 文件')
-      return
-    }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setUploadError(`文件不能超过 ${formatBytes(MAX_UPLOAD_BYTES)}`)
-      return
-    }
+  const pendingConversation = pendingDeleteConversation
+    ? conversations.find((item) => item.id === pendingDeleteConversation) ?? null
+    : null
+  const accountName = user.display_name?.trim() || user.username
+  const accountSubtitle = user.display_name?.trim() ? `@${user.username}` : '已登录'
 
-    setUploading(true)
-    setUploadError(null)
+  useEffect(() => {
+    if (!accountOpen) return
+    function onPointerDown(event: MouseEvent) {
+      if (!accountRef.current?.contains(event.target as Node)) {
+        setAccountOpen(false)
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setAccountOpen(false)
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [accountOpen])
+
+  /** 退出登录并回到落地页。 */
+  async function handleLogout() {
+    if (loggingOut) return
+    setLoggingOut(true)
     try {
-      await uploadDocument(file)
-      await onChanged()
-    } catch (error) {
-      setUploadError(errorText(error))
+      await logout()
+    } catch {
+      // 即使网络失败也回到登录页，由服务端 Cookie 兜底。
     } finally {
-      setUploading(false)
-      if (inputRef.current) inputRef.current.value = ''
+      window.location.assign('/?login=1')
     }
   }
 
-  async function handleDelete(document: DocumentItem) {
-    setDeletingId(document.document_id)
-    setDeleteError(null)
+  /** 进入会话重命名状态。 */
+  function startRename(conversation: ConversationSummary) {
+    setRenamingId(conversation.id)
+    setRenameValue(conversation.title)
+    setPendingDeleteConversation(null)
+    setConversationActionError(null)
+  }
+
+  /** 退出会话重命名状态。 */
+  function cancelRename() {
+    setRenamingId(null)
+    setRenameValue('')
+    setConversationActionError(null)
+  }
+
+  /** 保存会话新标题。 */
+  async function saveRename(conversationId: string) {
+    const title = renameValue.trim()
+    if (!title) {
+      setConversationActionError('会话标题不能为空')
+      return
+    }
+    setRenameSaving(true)
+    setConversationActionError(null)
     try {
-      await deleteDocument(document.document_id)
-      setPendingDelete(null)
-      await onChanged()
+      await onRenameConversation(conversationId, title)
+      setRenamingId(null)
+      setRenameValue('')
     } catch (error) {
-      setDeleteError(errorText(error))
+      setConversationActionError(errorText(error))
     } finally {
-      setDeletingId(null)
+      setRenameSaving(false)
+    }
+  }
+
+  /** 关闭删除确认框并清除操作错误。 */
+  function cancelDeleteConversation() {
+    if (deletingConversation) return
+    setPendingDeleteConversation(null)
+    setConversationActionError(null)
+  }
+
+  /** 确认删除会话并清理当前选中状态。 */
+  async function confirmDeleteConversation(conversationId: string) {
+    if (deletingConversation) return
+    setDeletingConversation(conversationId)
+    setConversationActionError(null)
+    try {
+      await onDeleteConversation(conversationId)
+      setPendingDeleteConversation(null)
+    } catch (error) {
+      setConversationActionError(errorText(error))
+    } finally {
+      setDeletingConversation(null)
     }
   }
 
   return (
-    <div className="flex h-full flex-col border-r border-line bg-surface">
+    <div className="flex h-full flex-col border-r border-line bg-canvas">
       <div className="flex items-center gap-3 px-5 pb-4 pt-5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-linear-to-br from-accent to-accent-ink text-white shadow-card">
-          <Sparkles className="h-4 w-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[15px] font-semibold tracking-tight">X RAG Agent</div>
-          <div className="text-[12px] text-muted">知识库工作台</div>
+        <div className="min-w-0 flex-1 font-brand text-[18px] font-bold uppercase tracking-[0.08em]">
+          X-AGENT
         </div>
         {onClose && (
           <button
@@ -117,183 +185,242 @@ export default function Sidebar({
         </span>
       </div>
 
-      <div className="px-4">
+      <div className="px-2 pb-2">
         <button
           type="button"
-          onClick={() => inputRef.current?.click()}
-          onDragOver={(event) => {
-            event.preventDefault()
-            setDragging(true)
-          }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={(event) => {
-            event.preventDefault()
-            setDragging(false)
-            void handleFile(event.dataTransfer.files?.[0])
-          }}
-          disabled={uploading}
-          className={cx(
-            'flex w-full flex-col items-center justify-center rounded-2xl border border-dashed px-4 py-5 text-center transition-colors',
-            dragging
-              ? 'border-accent bg-accent-soft'
-              : 'border-line bg-canvas/40 hover:border-accent/50 hover:bg-accent-soft/60',
-            uploading && 'cursor-wait opacity-70',
-          )}
+          onClick={onNewConversation}
+          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[14px] font-medium text-ink transition-colors hover:bg-subtle"
         >
-          {uploading ? (
-            <Loader2 className="h-5 w-5 animate-spin text-accent" />
-          ) : (
-            <UploadCloud className="h-5 w-5 text-muted" />
-          )}
-          <span className="mt-2 text-[13px] font-medium">
-            {uploading ? '正在解析并入库…' : '上传文档'}
-          </span>
-          <span className="mt-0.5 text-[11px] text-muted">
-            拖拽或点击 · txt / md / pdf · ≤ 20MB
-          </span>
+          <SquarePen className="h-4 w-4" />
+          新聊天
         </button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".txt,.md,.pdf"
-          className="hidden"
-          onChange={(event) => void handleFile(event.target.files?.[0])}
-        />
-        {uploadError && (
-          <p className="mt-2 rounded-lg bg-danger-soft px-2.5 py-1.5 text-[12px] text-danger">
-            {uploadError}
-          </p>
-        )}
       </div>
 
-      <div className="mt-5 flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center justify-between px-5 pb-2">
-          <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-faint">
-            知识库
-          </h2>
-          <div className="flex items-center gap-1">
-            <span className="text-[11px] text-faint">{documents.length}</span>
-            <button
-              type="button"
-              onClick={onRefresh}
-              aria-label="刷新文档列表"
-              title="刷新文档列表"
-              className="rounded-md p-1.5 text-faint transition-colors hover:bg-subtle hover:text-ink"
-            >
-              <RefreshCw className={cx('h-3.5 w-3.5', loading && 'animate-spin')} />
-            </button>
-          </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="px-2 pb-3">
+          <button
+            type="button"
+            onClick={() => onViewChange('library')}
+            aria-current={activeView === 'library' ? 'page' : undefined}
+            className={cx(
+              'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-[14px] font-medium transition-colors',
+              activeView === 'library'
+                ? 'bg-subtle text-ink'
+                : 'text-muted hover:bg-subtle hover:text-ink',
+            )}
+          >
+            <Library className="h-4 w-4" />
+            资料库
+          </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
-          {loading && documents.length === 0 ? (
-            <div className="space-y-2 px-2">
+        <div className="flex items-center justify-between px-5 pb-1.5">
+          <h2 className="text-[12px] font-medium text-faint">最近</h2>
+        </div>
+
+        <div className="space-y-0.5 px-2 pb-2">
+          {conversationActionError && (
+            <p className="mx-1 rounded-lg bg-danger-soft px-2 py-1.5 text-[11px] leading-5 text-danger">
+              {conversationActionError}
+            </p>
+          )}
+          {conversationsLoading && conversations.length === 0 ? (
+            <div className="space-y-1">
               {[0, 1, 2].map((item) => (
-                <div key={item} className="flex animate-pulse items-center gap-2.5">
-                  <div className="h-7 w-7 rounded-lg bg-subtle" />
-                  <div className="flex-1 space-y-1.5">
-                    <div className="h-2.5 w-2/3 rounded bg-subtle" />
-                    <div className="h-2 w-1/3 rounded bg-subtle" />
-                  </div>
+                <div key={item} className="animate-pulse px-3 py-2">
+                  <div className="h-2.5 w-2/3 rounded bg-subtle" />
                 </div>
               ))}
             </div>
-          ) : error ? (
-            <div className="mx-1 rounded-xl border border-danger/20 bg-danger-soft px-3 py-2.5">
-              <p className="text-[12px] text-danger">{error}</p>
+          ) : conversationsError ? (
+            <div className="px-3 py-2 text-[11px] text-danger">
+              <p>{conversationsError}</p>
               <button
                 type="button"
-                onClick={onRefresh}
-                className="mt-2 text-[12px] font-medium text-danger underline underline-offset-2"
+                onClick={onRefreshConversations}
+                className="mt-1 font-medium text-danger underline underline-offset-2"
               >
                 重试
               </button>
             </div>
-          ) : documents.length === 0 ? (
-            <div className="mx-2 rounded-xl border border-dashed border-line px-3 py-6 text-center">
-              <FileText className="mx-auto h-5 w-5 text-faint" />
-              <p className="mt-2 text-[12px] text-muted">还没有文档</p>
-              <p className="mt-0.5 text-[11px] text-faint">
-                上传后会自动切分并写入向量库
-              </p>
+          ) : conversations.length === 0 ? (
+            <div className="px-3 py-3 text-left text-[13px] text-faint">
+              还没有对话，点击“新对话”开始
             </div>
           ) : (
-            <ul className="space-y-1">
-              {documents.map((document) => {
-                const isPending = pendingDelete === document.document_id
-                const isDeleting = deletingId === document.document_id
+            conversations.map((conversation) => {
+              const active = activeConversationId === conversation.id
+
+              if (renamingId === conversation.id) {
                 return (
-                  <li key={document.document_id}>
-                    {isPending ? (
-                      <div className="rounded-xl border border-danger/20 bg-danger-soft px-2.5 py-2">
-                        <p className="text-[12px] leading-5 text-danger">
-                          删除「{document.source}」及其 {document.chunks} 个片段？
-                        </p>
-                        <div className="mt-1.5 flex gap-1.5">
-                          <button
-                            type="button"
-                            disabled={isDeleting}
-                            onClick={() => void handleDelete(document)}
-                            className="inline-flex items-center gap-1 rounded-md bg-danger px-2 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-                          >
-                            {isDeleting && <Loader2 className="h-3 w-3 animate-spin" />}
-                            {isDeleting ? '删除中…' : '删除'}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isDeleting}
-                            onClick={() => setPendingDelete(null)}
-                            className="rounded-md border border-line bg-surface px-2 py-1 text-[11px] text-muted transition-colors hover:bg-subtle"
-                          >
-                            取消
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="group flex items-center gap-2.5 rounded-xl px-2 py-2 transition-colors hover:bg-canvas/70">
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-line bg-surface text-muted">
-                          <FileText className="h-3.5 w-3.5" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div
-                            className="truncate text-[13px] font-medium"
-                            title={document.source}
-                          >
-                            {document.source}
-                          </div>
-                          <div className="text-[11px] text-faint">
-                            {document.chunks} 个片段
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          aria-label={`删除 ${document.source}`}
-                          onClick={() => {
-                            setDeleteError(null)
-                            setPendingDelete(document.document_id)
-                          }}
-                          className="rounded-md p-1 text-faint opacity-100 transition-all hover:bg-danger-soft hover:text-danger sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </li>
+                  <div
+                    key={conversation.id}
+                    className="rounded-lg bg-subtle/60 px-2 py-2"
+                  >
+                    <input
+                      value={renameValue}
+                      onChange={(event) => setRenameValue(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          void saveRename(conversation.id)
+                        }
+                        if (event.key === 'Escape') cancelRename()
+                      }}
+                      maxLength={120}
+                      autoFocus
+                      aria-label="会话标题"
+                      className="h-8 w-full rounded-md border border-line bg-surface px-2 text-[12px] text-ink outline-none focus:border-accent"
+                    />
+                    <div className="mt-1.5 flex gap-1.5">
+                      <button
+                        type="button"
+                        disabled={renameSaving}
+                        onClick={() => void saveRename(conversation.id)}
+                        className="inline-flex items-center gap-1 rounded-md bg-accent px-2 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                      >
+                        {renameSaving && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {renameSaving ? '保存中…' : '保存'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={renameSaving}
+                        onClick={cancelRename}
+                        className="rounded-md border border-line bg-surface px-2 py-1 text-[11px] text-muted transition-colors hover:bg-subtle"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
                 )
-              })}
-            </ul>
-          )}
-          {deleteError && (
-            <p className="mx-2 mt-2 rounded-lg bg-danger-soft px-2.5 py-1.5 text-[12px] text-danger">
-              {deleteError}
-            </p>
+              }
+
+              return (
+                <div
+                  key={conversation.id}
+                  className={cx(
+                    'group/item flex items-center gap-0.5 rounded-lg transition-colors',
+                    active ? 'bg-subtle' : 'hover:bg-subtle',
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSelectConversation(conversation.id)}
+                    title={conversation.title}
+                    className="min-w-0 flex-1 truncate rounded-lg px-3 py-2 text-left text-[14px] text-ink"
+                  >
+                    {conversation.title}
+                  </button>
+                  <div className="flex shrink-0 items-center pr-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/item:opacity-100 sm:group-focus-within/item:opacity-100">
+                    <button
+                      type="button"
+                      aria-label={`重命名会话 ${conversation.title}`}
+                      title="重命名"
+                      onClick={() => startRename(conversation)}
+                      className="rounded-md p-1 text-faint transition-colors hover:bg-surface hover:text-ink"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`删除会话 ${conversation.title}`}
+                      title="删除会话"
+                      onClick={() => {
+                        setConversationActionError(null)
+                        setRenamingId(null)
+                        setPendingDeleteConversation(conversation.id)
+                      }}
+                      className="rounded-md p-1 text-faint transition-colors hover:bg-danger-soft hover:text-danger"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              )
+            })
           )}
         </div>
       </div>
 
-      <div className="border-t border-line px-5 py-3 text-[11px] leading-relaxed text-faint">
-        回答基于 Chroma 向量检索，引用片段可展开查看。
+      <div ref={accountRef} className="relative px-3 pb-3 pt-1">
+        {accountOpen && (
+          <div
+            role="menu"
+            className="absolute bottom-full left-3 right-3 z-20 mb-2 overflow-hidden rounded-2xl border border-line bg-surface shadow-pop"
+          >
+            <div className="flex items-center gap-2.5 px-4 py-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
+                <UserRound className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-[14px] font-medium text-ink">
+                  {accountName}
+                </span>
+                <span className="block truncate text-[12px] text-faint">
+                  {accountSubtitle}
+                </span>
+              </span>
+            </div>
+            <div className="h-px bg-line" />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => void handleLogout()}
+              disabled={loggingOut}
+              className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[14px] text-ink transition-colors hover:bg-subtle disabled:opacity-60"
+            >
+              {loggingOut ? (
+                <Loader2 className="h-4 w-4 animate-spin text-muted" />
+              ) : (
+                <LogOut className="h-4 w-4 text-muted" />
+              )}
+              {loggingOut ? '正在退出…' : '退出登录'}
+            </button>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setAccountOpen((value) => !value)}
+          aria-haspopup="menu"
+          aria-expanded={accountOpen}
+          className={cx(
+            'flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-subtle',
+            accountOpen && 'bg-subtle',
+          )}
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
+            <UserRound className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[13px] font-medium text-ink">
+              {accountName}
+            </span>
+            <span className="block truncate text-[11px] text-faint">
+              {accountSubtitle}
+            </span>
+          </span>
+        </button>
       </div>
+
+      <ConfirmDialog
+        open={pendingDeleteConversation !== null}
+        title="删除对话？"
+        description={
+          <>
+            这将永久删除「{pendingConversation?.title ?? '该对话'}」。此操作无法撤销。
+          </>
+        }
+        confirmLabel="删除对话"
+        busy={deletingConversation !== null}
+        error={conversationActionError}
+        onConfirm={() => {
+          if (pendingDeleteConversation) {
+            void confirmDeleteConversation(pendingDeleteConversation)
+          }
+        }}
+        onCancel={cancelDeleteConversation}
+      />
     </div>
   )
 }

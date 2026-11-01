@@ -7,13 +7,13 @@ const components: Components = {
     <p className="mb-3 leading-7 last:mb-0" {...props} />
   ),
   h1: ({ node: _node, ...props }) => (
-    <h1 className="mb-2 mt-5 text-[19px] font-semibold tracking-tight first:mt-0" {...props} />
+    <h1 className="mb-2 mt-5 text-[20px] font-semibold tracking-tight first:mt-0" {...props} />
   ),
   h2: ({ node: _node, ...props }) => (
-    <h2 className="mb-2 mt-5 text-[16px] font-semibold tracking-tight first:mt-0" {...props} />
+    <h2 className="mb-2 mt-5 text-[17px] font-semibold tracking-tight first:mt-0" {...props} />
   ),
   h3: ({ node: _node, ...props }) => (
-    <h3 className="mb-1.5 mt-4 text-[14px] font-semibold first:mt-0" {...props} />
+    <h3 className="mb-1.5 mt-4 text-[15px] font-semibold first:mt-0" {...props} />
   ),
   ul: ({ node: _node, ...props }) => (
     <ul className="mb-3 list-disc space-y-1 pl-5 last:mb-0" {...props} />
@@ -45,7 +45,7 @@ const components: Components = {
     if (isBlock) {
       return (
         <code
-          className={cx('font-mono text-[13px] leading-6', className)}
+          className={cx('font-mono text-[14px] leading-6', className)}
           {...props}
         >
           {children}
@@ -63,13 +63,13 @@ const components: Components = {
   },
   pre: ({ node: _node, ...props }) => (
     <pre
-      className="mb-4 overflow-x-auto rounded-xl border border-white/10 bg-[#1e1e1b] p-4 text-[13px] leading-6 text-[#f4f4f0]"
+      className="mb-4 overflow-x-auto rounded-xl border border-white/10 bg-[#1e1e1b] p-4 text-[14px] leading-6 text-[#f4f4f0]"
       {...props}
     />
   ),
   table: ({ node: _node, ...props }) => (
     <div className="mb-4 overflow-x-auto rounded-lg border border-line">
-      <table className="w-full border-collapse text-[13px]" {...props} />
+      <table className="w-full border-collapse text-[14px]" {...props} />
     </div>
   ),
   thead: ({ node: _node, ...props }) => (
@@ -91,6 +91,7 @@ const components: Components = {
   ),
 }
 
+/** Markdown 内容渲染器。 */
 export default function Markdown({ content }: { content: string }) {
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>

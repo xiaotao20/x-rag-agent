@@ -3,9 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronLeft } from 'lucide-react'
 import ChatPanel from './ChatPanel'
+import LibraryPanel from './LibraryPanel'
 import Sidebar from './Sidebar'
-import { checkHealth, listDocuments } from '@/lib/api'
-import type { DocumentItem } from '@/lib/types'
+import {
+  checkHealth,
+  deleteConversation,
+  listConversations,
+  listDocuments,
+  renameConversation,
+} from '@/lib/api'
+import type { AuthUser } from '@/lib/auth'
+import type { ConversationSummary, DocumentItem, WorkspaceView } from '@/lib/types'
 import { cx, errorText } from '@/lib/utils'
 
 const HOVER_OPEN_DELAY = 120
@@ -13,17 +21,24 @@ const HOVER_CLOSE_DELAY = 220
 const SIDEBAR_TRANSITION_MS = 300
 const PIN_SETTLE_MS = SIDEBAR_TRANSITION_MS + 20
 
-export default function AppShell() {
+/** 聊天工作台布局、会话/文档状态与侧栏交互。 */
+export default function AppShell({ user }: { user: AuthUser }) {
   const [pinned, setPinned] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [documents, setDocuments] = useState<DocumentItem[]>([])
   const [documentsLoading, setDocumentsLoading] = useState(true)
   const [documentsError, setDocumentsError] = useState<string | null>(null)
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [conversationsLoading, setConversationsLoading] = useState(true)
+  const [conversationsError, setConversationsError] = useState<string | null>(null)
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  const [view, setView] = useState<WorkspaceView>('chat')
   const [online, setOnline] = useState<boolean | null>(null)
   const openTimerRef = useRef<number | null>(null)
   const closeTimerRef = useRef<number | null>(null)
   const pinTimerRef = useRef<number | null>(null)
+  const initialConversationSelected = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -45,6 +60,7 @@ export default function AppShell() {
     }
   }, [])
 
+  /** 加载知识库文档列表。 */
   const loadDocuments = useCallback(async () => {
     setDocumentsLoading(true)
     setDocumentsError(null)
@@ -62,6 +78,71 @@ export default function AppShell() {
   useEffect(() => {
     void loadDocuments()
   }, [loadDocuments])
+
+  /** 加载会话列表，并在首次加载时恢复最近会话。 */
+  const loadConversations = useCallback(async () => {
+    setConversationsLoading(true)
+    setConversationsError(null)
+    try {
+      const nextConversations = await listConversations()
+      setConversations(nextConversations)
+      if (!initialConversationSelected.current) {
+        initialConversationSelected.current = true
+        if (nextConversations.length > 0) {
+          setActiveConversationId((current) => current ?? nextConversations[0].id)
+        }
+      }
+    } catch (error) {
+      setConversationsError(errorText(error))
+    } finally {
+      setConversationsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadConversations()
+  }, [loadConversations])
+
+  /** 切换右侧工作区视图并关闭移动端侧栏。 */
+  function changeView(next: WorkspaceView) {
+    setView(next)
+    setMobileOpen(false)
+  }
+
+  /** 清空当前会话，回到问答视图。 */
+  function startNewConversation() {
+    setView('chat')
+    setActiveConversationId(null)
+    setMobileOpen(false)
+  }
+
+  /** 切换当前会话，回到问答视图并关闭移动端侧栏。 */
+  function selectConversation(conversationId: string) {
+    setView('chat')
+    setActiveConversationId(conversationId)
+    setMobileOpen(false)
+  }
+
+  /** 重命名会话并同步本地列表。 */
+  async function renameConversationItem(conversationId: string, title: string) {
+    const updated = await renameConversation(conversationId, title)
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId ? updated : conversation,
+      ),
+    )
+  }
+
+  /** 删除会话；若为当前会话则回到新对话。 */
+  async function deleteConversationItem(conversationId: string) {
+    await deleteConversation(conversationId)
+    setConversations((current) =>
+      current.filter((conversation) => conversation.id !== conversationId),
+    )
+    setActiveConversationId((current) =>
+      current === conversationId ? null : current,
+    )
+  }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -82,6 +163,7 @@ export default function AppShell() {
     }
   }, [])
 
+  /** 取消延迟打开侧栏。 */
   function cancelPreviewOpen() {
     if (openTimerRef.current !== null) {
       window.clearTimeout(openTimerRef.current)
@@ -89,6 +171,7 @@ export default function AppShell() {
     }
   }
 
+  /** 取消延迟关闭侧栏。 */
   function cancelPreviewClose() {
     if (closeTimerRef.current !== null) {
       window.clearTimeout(closeTimerRef.current)
@@ -96,6 +179,7 @@ export default function AppShell() {
     }
   }
 
+  /** 延迟打开悬停预览侧栏。 */
   function schedulePreviewOpen() {
     if (pinned) return
     cancelPreviewClose()
@@ -106,6 +190,7 @@ export default function AppShell() {
     }, HOVER_OPEN_DELAY)
   }
 
+  /** 延迟关闭悬停预览侧栏。 */
   function schedulePreviewClose() {
     if (pinned) return
     cancelPreviewOpen()
@@ -116,6 +201,7 @@ export default function AppShell() {
     }, HOVER_CLOSE_DELAY)
   }
 
+  /** 取消侧栏固定过渡计时。 */
   function cancelPinSettle() {
     if (pinTimerRef.current !== null) {
       window.clearTimeout(pinTimerRef.current)
@@ -123,6 +209,7 @@ export default function AppShell() {
     }
   }
 
+  /** 固定侧栏并处理预览层过渡。 */
   function pinSidebar() {
     cancelPreviewOpen()
     cancelPreviewClose()
@@ -139,6 +226,7 @@ export default function AppShell() {
     }
   }
 
+  /** 取消固定并收起侧栏。 */
   function unpinSidebar() {
     cancelPreviewOpen()
     cancelPreviewClose()
@@ -147,6 +235,7 @@ export default function AppShell() {
     setPreviewOpen(false)
   }
 
+  /** 根据固定状态隐藏侧栏。 */
   function hideSidebar() {
     if (pinned) {
       unpinSidebar()
@@ -157,6 +246,7 @@ export default function AppShell() {
     }
   }
 
+  /** 切换移动端侧栏。 */
   function toggleMobileSidebar() {
     setMobileOpen((value) => !value)
   }
@@ -179,25 +269,34 @@ export default function AppShell() {
             )}
           >
             <Sidebar
-              documents={documents}
-              loading={documentsLoading}
-              error={documentsError}
+              user={user}
               online={online}
-              onRefresh={loadDocuments}
-              onChanged={loadDocuments}
+              activeView={view}
+              onViewChange={changeView}
+              conversations={conversations}
+              conversationsLoading={conversationsLoading}
+              conversationsError={conversationsError}
+              activeConversationId={activeConversationId}
+              onSelectConversation={selectConversation}
+              onNewConversation={startNewConversation}
+              onRefreshConversations={() => void loadConversations()}
+              onRenameConversation={renameConversationItem}
+              onDeleteConversation={deleteConversationItem}
             />
           </div>
         </div>
         {pinned && !previewOpen && (
-          <button
-            type="button"
-            onClick={unpinSidebar}
-            aria-label="收起侧栏"
-            title="收起侧栏"
-            className="absolute left-full top-1/2 z-40 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-line bg-surface text-muted shadow-card transition-colors hover:bg-subtle hover:text-ink"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </button>
+          <div className="group/edge absolute left-full top-0 z-40 h-full w-3 -translate-x-1/2">
+            <button
+              type="button"
+              onClick={unpinSidebar}
+              aria-label="收起侧栏"
+              title="收起侧栏"
+              className="absolute left-1/2 top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-line bg-surface text-muted opacity-0 shadow-card transition-opacity duration-150 hover:bg-subtle hover:text-ink group-hover/edge:opacity-100 focus-visible:opacity-100"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+          </div>
         )}
       </aside>
 
@@ -229,12 +328,19 @@ export default function AppShell() {
           }}
         >
           <Sidebar
-            documents={documents}
-            loading={documentsLoading}
-            error={documentsError}
+            user={user}
             online={online}
-            onRefresh={loadDocuments}
-            onChanged={loadDocuments}
+            activeView={view}
+            onViewChange={changeView}
+            conversations={conversations}
+            conversationsLoading={conversationsLoading}
+            conversationsError={conversationsError}
+            activeConversationId={activeConversationId}
+            onSelectConversation={selectConversation}
+            onNewConversation={startNewConversation}
+            onRefreshConversations={() => void loadConversations()}
+            onRenameConversation={renameConversationItem}
+            onDeleteConversation={deleteConversationItem}
           />
           {previewOpen && (
             <button
@@ -263,23 +369,44 @@ export default function AppShell() {
           />
           <div className="absolute inset-y-0 left-0 w-[304px] max-w-[86vw] shadow-pop">
             <Sidebar
-              documents={documents}
-              loading={documentsLoading}
-              error={documentsError}
+              user={user}
               online={online}
-              onRefresh={loadDocuments}
-              onChanged={loadDocuments}
+              activeView={view}
+              onViewChange={changeView}
+              conversations={conversations}
+              conversationsLoading={conversationsLoading}
+              conversationsError={conversationsError}
+              activeConversationId={activeConversationId}
+              onSelectConversation={selectConversation}
+              onNewConversation={startNewConversation}
+              onRefreshConversations={() => void loadConversations()}
+              onRenameConversation={renameConversationItem}
+              onDeleteConversation={deleteConversationItem}
               onClose={() => setMobileOpen(false)}
             />
           </div>
         </div>
       )}
 
-      <ChatPanel
-        documentCount={documents.length}
-        online={online}
-        onToggleSidebar={toggleMobileSidebar}
-      />
+      {view === 'library' ? (
+        <LibraryPanel
+          documents={documents}
+          loading={documentsLoading}
+          error={documentsError}
+          onRefresh={loadDocuments}
+          onToggleSidebar={toggleMobileSidebar}
+        />
+      ) : (
+        <ChatPanel
+          documentCount={documents.length}
+          online={online}
+          onToggleSidebar={toggleMobileSidebar}
+          onOpenLibrary={() => changeView('library')}
+          conversationId={activeConversationId}
+          onConversationChange={setActiveConversationId}
+          onConversationsChanged={() => void loadConversations()}
+        />
+      )}
     </div>
   )
 }

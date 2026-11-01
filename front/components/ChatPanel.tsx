@@ -1,20 +1,51 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Menu, Plus } from 'lucide-react'
+import { Loader2, Menu } from 'lucide-react'
 import Composer from './Composer'
 import EmptyState from './EmptyState'
 import Message from './Message'
-import { streamChat } from '@/lib/api'
-import type { ChatMessage, StreamEvent } from '@/lib/types'
-import { cx, errorText } from '@/lib/utils'
+import { getConversation, streamChat } from '@/lib/api'
+import type {
+  ChatMessage,
+  MessageStatus,
+  StoredConversationMessage,
+  StreamEvent,
+} from '@/lib/types'
+import { errorText } from '@/lib/utils'
 
 interface ChatPanelProps {
   online: boolean | null
   documentCount: number
   onToggleSidebar: () => void
+  onOpenLibrary: () => void
+  conversationId: string | null
+  onConversationChange: (conversationId: string | null) => void
+  onConversationsChanged: () => void
 }
 
+/** 把后端持久化消息转换成前端消息。 */
+function storedToChatMessage(message: StoredConversationMessage): ChatMessage {
+  const status: MessageStatus =
+    message.status === 'error'
+      ? 'error'
+      : message.status === 'stopped'
+        ? 'stopped'
+        : 'done'
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    sources: message.sources ?? undefined,
+    tools: message.tool_calls?.map((call) => ({
+      name: call.name,
+      state: 'done' as const,
+    })),
+    status,
+  }
+}
+
+/** 生成前端消息 ID。 */
 function newId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID()
@@ -22,19 +53,27 @@ function newId(): string {
   return Math.random().toString(36).slice(2)
 }
 
+/** 消息列表、会话历史加载和 SSE 流式状态。 */
 export default function ChatPanel({
   online,
   documentCount,
   onToggleSidebar,
+  onOpenLibrary,
+  conversationId,
+  onConversationChange,
+  onConversationsChanged,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   const busyRef = useRef(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const stickToBottom = useRef(true)
+  const skipLoadRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!stickToBottom.current) return
@@ -42,6 +81,48 @@ export default function ChatPanel({
     if (element) element.scrollTop = element.scrollHeight
   }, [messages])
 
+  useEffect(() => {
+    if (conversationId && skipLoadRef.current === conversationId) {
+      skipLoadRef.current = null
+      setHistoryLoading(false)
+      setHistoryError(null)
+      return
+    }
+
+    abortRef.current?.abort()
+    busyRef.current = false
+    setStreaming(false)
+
+    if (!conversationId) {
+      setMessages([])
+      setHistoryLoading(false)
+      setHistoryError(null)
+      return
+    }
+
+    let active = true
+    setHistoryLoading(true)
+    setHistoryError(null)
+    setMessages([])
+
+    getConversation(conversationId)
+      .then((detail) => {
+        if (!active) return
+        setMessages(detail.messages.map(storedToChatMessage))
+      })
+      .catch((error) => {
+        if (active) setHistoryError(errorText(error))
+      })
+      .finally(() => {
+        if (active) setHistoryLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [conversationId])
+
+  /** 记录用户是否仍停留在消息底部。 */
   function handleScroll() {
     const element = scrollRef.current
     if (!element) return
@@ -49,9 +130,10 @@ export default function ChatPanel({
       element.scrollHeight - element.scrollTop - element.clientHeight < 96
   }
 
+  /** 发送问题并通过 SSE 更新助手消息。 */
   async function send(raw?: string) {
     const question = (raw ?? input).trim()
-    if (!question || busyRef.current) return
+    if (!question || busyRef.current || historyLoading) return
 
     busyRef.current = true
     setStreaming(true)
@@ -86,6 +168,14 @@ export default function ChatPanel({
     }
 
     const onEvent = (event: StreamEvent) => {
+      if (event.type === 'conversation') {
+        if (event.conversation_id !== conversationId) {
+          skipLoadRef.current = event.conversation_id
+          onConversationChange(event.conversation_id)
+        }
+        onConversationsChanged()
+        return
+      }
       if (event.type === 'token') {
         updateAssistant((message) => ({
           ...message,
@@ -123,15 +213,17 @@ export default function ChatPanel({
           status: 'error',
           error: event.message,
         }))
+        onConversationsChanged()
         return
       }
       if (event.type === 'done') {
         updateAssistant((message) => ({ ...message, status: 'done' }))
+        onConversationsChanged()
       }
     }
 
     try {
-      await streamChat(question, onEvent, controller.signal)
+      await streamChat(question, conversationId, onEvent, controller.signal)
       updateAssistant((message) =>
         message.status === 'streaming' ? { ...message, status: 'done' } : message,
       )
@@ -155,75 +247,51 @@ export default function ChatPanel({
     }
   }
 
+  /** 中断当前流式生成。 */
   function stop() {
     abortRef.current?.abort()
   }
 
-  function newChat() {
-    abortRef.current?.abort()
-    busyRef.current = false
-    setStreaming(false)
-    setMessages([])
-    setInput('')
-  }
-
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-line bg-canvas/80 px-4 backdrop-blur sm:px-6">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <button
-            type="button"
-            onClick={onToggleSidebar}
-            aria-label="打开文档侧栏"
-            className="rounded-lg border border-line bg-surface p-1.5 text-muted transition-colors hover:text-ink lg:hidden"
-          >
-            <Menu className="h-4 w-4" />
-          </button>
-          <div className="min-w-0">
-            <h1 className="truncate text-[14px] font-semibold tracking-tight">
-              知识库问答
-            </h1>
-            <p className="hidden text-[11px] text-muted sm:block">
-              基于已上传文档回答，并附带引用来源
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="hidden items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-1 text-[11px] text-muted sm:flex">
-            <span
-              className={cx(
-                'h-1.5 w-1.5 rounded-full',
-                online === null ? 'bg-faint' : online ? 'bg-success' : 'bg-danger',
-              )}
-            />
-            {online === null ? '连接中' : online ? '在线' : '离线'}
-          </span>
-          <button
-            type="button"
-            onClick={newChat}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-[12px] font-medium shadow-sm transition-colors hover:bg-subtle"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            新对话
-          </button>
-        </div>
-      </header>
-
       <div className="relative flex min-h-0 flex-1 flex-col">
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          aria-label="打开文档侧栏"
+          className="absolute left-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-lg bg-surface/90 text-muted shadow-sm backdrop-blur transition-colors hover:text-ink lg:hidden"
+        >
+          <Menu className="h-4 w-4" />
+        </button>
         <div
           ref={scrollRef}
           onScroll={handleScroll}
           className="min-h-0 flex-1 overflow-y-auto"
         >
-          {messages.length === 0 ? (
+          {historyLoading ? (
+            <div className="flex h-full items-center justify-center text-sm text-muted">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin text-accent" />
+              正在加载会话…
+            </div>
+          ) : historyError ? (
+            <div className="mx-auto mt-16 max-w-md rounded-2xl border border-danger/20 bg-danger-soft px-5 py-4 text-center">
+              <p className="text-[13px] text-danger">{historyError}</p>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="mt-3 text-[12px] font-medium text-danger underline underline-offset-2"
+              >
+                重新加载
+              </button>
+            </div>
+          ) : messages.length === 0 ? (
             <EmptyState
               documentCount={documentCount}
               onPick={(question) => void send(question)}
-              onOpenSidebar={onToggleSidebar}
+              onOpenLibrary={onOpenLibrary}
             />
           ) : (
-            <div className="mx-auto w-full max-w-3xl px-4 pb-10 pt-8 sm:px-6">
+            <div className="mx-auto w-full max-w-3xl px-4 pb-10 pt-14 sm:px-6 lg:pt-8">
               <div className="space-y-8">
                 {messages.map((message) => (
                   <Message key={message.id} message={message} />

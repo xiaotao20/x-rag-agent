@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 SUPPORTED = {".txt", ".md", ".pdf"}
 
 class IngestionService:
+    """负责文件校验、解析、切分和写入 Chroma。"""
     def __init__(self, vector_store: Chroma, upload_dir: Path, chunk_size: int, chunk_overlap: int, max_upload_mb: int):
+        """初始化切分器和上传目录。"""
         self.vector_store = vector_store
         self.upload_dir = upload_dir
         self.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -24,10 +26,14 @@ class IngestionService:
         self.max_upload_bytes = max_upload_mb * 1024 * 1024
 
     def delete_uploaded_file(self, document_id: str, source: str) -> None:
+        """删除上传目录中的原文件。"""
         safe_name = Path(source).name.replace("/", "_").replace("\\", "_")
         (self.upload_dir / f"{document_id}_{safe_name}").unlink(missing_ok=True)
 
-    def ingest_bytes(self, filename: str, content: bytes) -> tuple[str, int]:
+    def ingest_bytes(
+        self, filename: str, content: bytes, user_id: str
+    ) -> tuple[str, int]:
+        """解析上传字节流、切分并按用户写入向量库。"""
         suffix = Path(filename).suffix.lower()
         if suffix not in SUPPORTED:
             raise ValueError("仅支持 .txt、.md、.pdf 文件")
@@ -48,6 +54,7 @@ class IngestionService:
                 Document(page_content=d.page_content, metadata={
                     "source": safe_name,
                     "document_id": document_id,
+                    "user_id": str(user_id),
                     "page": int(d.metadata.get("page", 0)),
                 })
                 for d in docs

@@ -5,6 +5,14 @@ import { ChevronDown, FileText, Quote } from 'lucide-react'
 import type { SourceItem } from '@/lib/types'
 import { cx, formatScore } from '@/lib/utils'
 
+const SCORE_META: Record<string, { label: string; title: string }> = {
+  vector: { label: '距离', title: 'Chroma 向量距离，数值越小越相似' },
+  bm25: { label: '关键词分', title: 'BM25 关键词相关性分数，数值越大越相关' },
+  rrf: { label: '融合分', title: '混合检索 RRF 融合分，数值越大越相关' },
+  rerank: { label: '相关度', title: 'Rerank 相关性分数，数值越大越相关' },
+}
+
+/** 引用来源折叠面板。 */
 export default function Sources({ sources }: { sources: SourceItem[] }) {
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState<number | null>(null)
@@ -36,6 +44,8 @@ export default function Sources({ sources }: { sources: SourceItem[] }) {
         <div className="space-y-1 border-t border-line p-1.5">
           {sources.map((source, index) => {
             const isExpanded = expanded === index
+            const scoreMeta = SCORE_META[source.score_type ?? 'vector'] ?? SCORE_META.vector
+            const scoreDigits = source.score_type === 'rrf' ? 3 : 2
             return (
               <div key={`${source.document_id}-${source.chunk_index}`}>
                 <button
@@ -56,9 +66,9 @@ export default function Sources({ sources }: { sources: SourceItem[] }) {
                   </span>
                   <span
                     className="shrink-0 rounded bg-subtle px-1.5 py-0.5 text-[10px] text-muted"
-                    title="Chroma 向量距离，数值越小越相似"
+                    title={scoreMeta.title}
                   >
-                    距离 {formatScore(source.score)}
+                    {scoreMeta.label} {formatScore(source.score, scoreDigits)}
                   </span>
                 </button>
                 {isExpanded && (
